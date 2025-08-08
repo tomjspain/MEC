@@ -1,6 +1,5 @@
-## pdac model shiny page - now with with dashboard layout and interactive survival plot
-usePackage <- function(p) 
-{
+## pdac model shiny page – single adjusted survival curve
+usePackage <- function(p) {
   if (!is.element(p, installed.packages()[,1]))
     install.packages(p, dep = TRUE)
   library(p, character.only = TRUE)
@@ -54,30 +53,24 @@ spline_surv_est <- function(lam, kn, k, haz_co, cov_co, cov = NULL, maxTime = 60
 
 # wrapper to make calling the model easier
 cfmEst <- function(maxTime = 60, beta = 0, cov = NULL) {
-  lam    <- smod$lam
-  kn     <- smod$kn
-  k      <- smod$k
-  haz_co <- smod$haz_co
-  cov_co <- smod$cov_co
-
   spline_surv_est(
-    lam    = lam,
-    kn     = kn,
-    k      = k,
-    haz_co = haz_co,
-    cov_co = cov_co,
+    lam    = smod$lam,
+    kn     = smod$kn,
+    k      = smod$k,
+    haz_co = smod$haz_co,
+    cov_co = smod$cov_co,
     cov    = cov,
     maxTime = maxTime,
     beta    = beta
   )
 }
 
-# ui setup
+# ui
 ui <- dashboardPage(
-  dashboardHeader(title = "cfm survival explorer - pdac model"),
+  dashboardHeader(title = "cfm survival explorer – PDAC model"),
   dashboardSidebar(
     sidebarMenu(
-      menuItem("survival curve", tabName = "surv_tab", icon = icon("chart-line"))
+      menuItem("Survival curve", tabName = "surv_tab", icon = icon("chart-line"))
     )
   ),
   dashboardBody(
@@ -86,16 +79,16 @@ ui <- dashboardPage(
         tabName = "surv_tab",
         fluidRow(
           box(
-            title = "inputs", status = "primary", solidHeader = TRUE,
+            title = "Inputs", status = "primary", solidHeader = TRUE,
             collapsible = TRUE, width = 4,
-            selectInput("t_stage", "t-stage:", choices = c(2,3,4), selected = 2),
-            selectInput("grade",   "grade:",   choices = c(1,2,3), selected = 2),
-            selectInput("nodes",   "nodes:",   choices = c(1,2),   selected = 1),
-            numericInput("lca199", "lca199:", value = 1, min = 0, step = 1),
-            sliderInput("maxTime", "max time (months):", min = 12, max = 120, value = 60, step = 12)
+            selectInput("t_stage", "T-stage:", choices = c(2,3,4), selected = 2),
+            selectInput("grade",   "Grade:",   choices = c(1,2,3), selected = 2),
+            selectInput("nodes",   "Nodes:",   choices = c(1,2),   selected = 1),
+            numericInput("lca199", "LCA199:", value = 1, min = 0, step = 1),
+            sliderInput("maxTime", "Max time (months):", min = 12, max = 120, value = 60, step = 12)
           ),
           box(
-            title = "survival plot", status = "info", solidHeader = TRUE,
+            title = "Survival plot", status = "info", solidHeader = TRUE,
             collapsible = TRUE, width = 8,
             withSpinner(plotlyOutput("survPlot", height = "500px"))
           )
@@ -105,9 +98,9 @@ ui <- dashboardPage(
   )
 )
 
-# server logic
+# server
 server <- function(input, output, session) {
-  # build design matrix based on user inputs
+  # build covariate matrix from inputs
   newCov <- reactive({
     df <- data.frame(
       t      = factor(input$t_stage, levels = c(2,3,4)),
@@ -118,30 +111,34 @@ server <- function(input, output, session) {
     model.matrix(~ t + grade + nodes + lca199, data = df)[, -1, drop = FALSE]
   })
 
-  # generate survival curves
+  # get adjusted survival curve only
   survData <- reactive({
-    s_base <- cfmEst(maxTime = input$maxTime)
-    s_adj  <- cfmEst(maxTime = input$maxTime, cov = newCov())
-    list(base = s_base, adj = s_adj)
+    cfmEst(maxTime = input$maxTime, cov = newCov())
   })
 
-  # plot the results
+  # render Plotly
   output$survPlot <- renderPlotly({
     sd <- survData()
-    df <- rbind(
-      data.frame(time = sd$base$time, S = sd$base$S, group = "baseline"),
-      data.frame(time = sd$adj$time,  S = sd$adj$S,  group = "adjusted")
-    )
+    df <- data.frame(time = sd$time, S = sd$S)
 
-    p <- ggplot(df, aes(x = time, y = S, color = group)) +
+    p <- ggplot(df, aes(x = time, y = S)) +
       geom_line(size = 1.2) +
-      labs(x = "time (months)", y = "survival probability") +
+      labs(x = "Time (months)", y = "Survival probability") +
       theme_minimal()
 
-    ggplotly(p) %>% layout(legend = list(x = 0.8, y = 0.9))
+    ggplotly(p) %>%
+    layout(
+      yaxis = list(
+        range      = c(0, 1),      # lock to [0,1]
+        autorange  = FALSE,        # disable auto-scaling
+        fixedrange = TRUE          # prevent any y-zoom/pan
+      ),
+      xaxis = list(
+        fixedrange = FALSE         # still allow zooming on x if you like
+      )
+    )
   })
 }
 
-# launch the app
+# launch app
 shinyApp(ui, server)
-
